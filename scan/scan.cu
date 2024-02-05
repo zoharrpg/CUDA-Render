@@ -29,8 +29,52 @@ static inline int nextPow2(int n)
     return n;
 }
 
+__global__ void
+up_sweep_kernel(int length,int*device_data,int twod1,int twod){
+    int index = (blockIdx.x * blockDim.x + threadIdx.x) * twod1;
+
+    if (index < length){
+        device_data[index+twod1-1]+=device_data[index+twod-1];
+    }
+
+
+}
+
+__global__ void
+down_sweep_kernel(int length,int*device_data,int twod1,int twod){
+    int index =( blockIdx.x * blockDim.x + threadIdx.x )* twod1;
+
+    if(index < length){
+        int t = device_data[index+twod-1];
+        device_data[index+twod-1] = device_data[index+twod1-1];
+        device_data[index+twod1-1]+=t;
+    }
+
+}
+
+
 void exclusive_scan(int* device_data, int length)
 {
+    int rounded_length = nextPow2(length);
+    const int threadsPerBlock = 512;
+    int blocks = (rounded_length + threadsPerBlock - 1) / threadsPerBlock;
+
+    for (int twod = 1;twod <rounded_length;twod*=2){
+        int twod1 = twod*2;
+        blocks = (rounded_length/twod1 + threadsPerBlock - 1) /threadsPerBlock;
+        up_sweep_kernel<<<blocks,threadsPerBlock>>>(rounded_length,device_data,twod1,twod);
+    
+    }
+    int zero = 0;
+
+    cudaMemcpy(&device_data[rounded_length-1],&zero,sizeof(int),cudaMemcpyHostToDevice);
+
+    for (int twod =rounded_length/2;twod >=1;twod/=2){
+        int twod1 = twod*2;
+        blocks = (rounded_length/twod1 + threadsPerBlock - 1) /threadsPerBlock;
+        down_sweep_kernel<<<blocks,threadsPerBlock>>>(rounded_length,device_data,twod1,twod);
+
+    }
     /* TODO
      * Fill in this function with your exclusive scan implementation.
      * You are passed the locations of the data in device memory
@@ -43,6 +87,7 @@ void exclusive_scan(int* device_data, int length)
      * both the data array is sized to accommodate the next
      * power of 2 larger than the input.
      */
+
 }
 
 /* This function is a wrapper around the code you will write - it copies the
@@ -108,9 +153,69 @@ double cudaScanThrust(int* inarray, int* end, int* resultarray) {
     return overallDuration;
 }
 
+__global__ void find_peeks_kernel(int * device_input, int* device_output,int length){
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if (index<length){
+         if (index>0 && index < length-1 && device_input[index]>device_input[index-1] && device_input[index]>device_input[index+1]){
+        device_output[index] = 1;
+    }else{
+        device_output[index] = 0;
+    }
+
+    }
+
+}
+
+__global__ void fill_kernel(int*device_output,int*device_input,int*tmp,int length){
+
+    int index = blockIdx.x * blockDim.x + threadIdx.x;
+
+    if(index>0 && index < length-1 && device_input[index]>device_input[index-1] && device_input[index]>device_input[index+1]){
+           int currentIndex = tmp[index];
+           device_output[currentIndex] = index;
+           
+        }
+
+
+
+}
 
 
 int find_peaks(int *device_input, int length, int *device_output) {
+    int rounded_length = nextPow2(length);
+    const int threadsPerBlock = 512;
+    int blocks = (length + threadsPerBlock - 1) / threadsPerBlock;
+    int *tmp;
+
+    cudaMalloc((void **)&tmp, rounded_length * sizeof(int));
+
+
+    
+    find_peeks_kernel<<<blocks,threadsPerBlock>>>(device_input,tmp,length);
+    
+    //cudaThreadSynchronize();
+
+    
+    
+    exclusive_scan(tmp,length);
+
+
+    int count = 0;
+
+    cudaMemcpy(&count,&tmp[length-1],sizeof(int),cudaMemcpyDeviceToHost);
+
+    fill_kernel<<<blocks,threadsPerBlock>>>(device_output,device_input,tmp,length);
+    //cudaThreadSynchronize();
+
+    return count;
+
+    
+
+
+
+
+
     /* TODO:
      * Finds all elements in the list that are greater than the elements before and after,
      * storing the index of the element into device_result.
@@ -125,7 +230,6 @@ int find_peaks(int *device_input, int length, int *device_output) {
      * it requires that. However, you must ensure that the results of
      * find_peaks are correct given the original length.
      */
-    return 0;
 }
 
 
