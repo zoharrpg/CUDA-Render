@@ -194,7 +194,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
     
     find_peeks_kernel<<<blocks,threadsPerBlock>>>(device_input,tmp,length);
     
-    //cudaThreadSynchronize();
+    cudaThreadSynchronize();
 
     
     
@@ -206,7 +206,7 @@ int find_peaks(int *device_input, int length, int *device_output) {
     cudaMemcpy(&count,&tmp[length-1],sizeof(int),cudaMemcpyDeviceToHost);
 
     fill_kernel<<<blocks,threadsPerBlock>>>(device_output,device_input,tmp,length);
-    //cudaThreadSynchronize();
+    cudaThreadSynchronize();
     cudaFree(tmp);
 
     return count;
