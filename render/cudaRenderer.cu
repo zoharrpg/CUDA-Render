@@ -442,33 +442,35 @@ __global__ void kernelRenderCircles() {
 
     for(int i = linearThreadIndex;i<cuConstRendererParams.numberOfCircles;i+=SCAN_BLOCK_DIM){
             
-            float3 position = *(float3*)(&cuConstRendererParams.position[i*3]);
+            
+            float3 position = *(float3*)(&cuConstRendererParams.position[3*i]);
             
             float radius = cuConstRendererParams.radius[i];
+
             
-            thread_count[i] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
+            thread_count[linearThreadIndex] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
 
             __syncthreads();
 
             sharedMemExclusiveScan(linearThreadIndex,thread_count,block_count,prefixSumScratch,SCAN_BLOCK_DIM);
 
             __syncthreads();
-
+            
             uint total = block_count[SCAN_BLOCK_DIM-1]+thread_count[SCAN_BLOCK_DIM-1];
 
-            int current_index = i%SCAN_BLOCK_DIM;
-
-            if(current_index<SCAN_BLOCK_DIM-1 && block_count[current_index+1]>block_count[current_index]){
-                
-                circle_array[block_count[current_index]] = i;
+            if(linearThreadIndex<SCAN_BLOCK_DIM-1 && thread_count[linearThreadIndex]==1& block_count[linearThreadIndex+1]>block_count[linearThreadIndex] ){
+               
+                circle_array[block_count[linearThreadIndex]] = i;
+                 //printf("%d\n",current_index);
                 
 
             }
             //__syncthreads();
             
-            if(current_index == SCAN_BLOCK_DIM-1 && (total>block_count[current_index])){
+            if(linearThreadIndex == SCAN_BLOCK_DIM-1 && (total>block_count[SCAN_BLOCK_DIM-1 ]&& thread_count[linearThreadIndex]==1)){
 
-                circle_array[block_count[current_index]] = i;
+                circle_array[block_count[linearThreadIndex]] = i;
+                //printf("%d\n",current_index);
                 
             }
 
@@ -717,7 +719,7 @@ void
 CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
-    dim3 blockDim(256,1);
+    dim3 blockDim(32,32);
     dim3 gridDim((image->width+ blockDim.x - 1) / blockDim.x,(image->height+blockDim.y - 1)/blockDim.y);
 
     kernelRenderCircles<<<gridDim, blockDim>>>();
