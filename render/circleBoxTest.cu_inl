@@ -1,5 +1,3 @@
-
-
 __device__ __inline__ int
 circleInBoxConservative(
     float circleX, float circleY, float circleRadius,

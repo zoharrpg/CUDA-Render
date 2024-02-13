@@ -1,4 +1,3 @@
-
 // exclusiveScan.cu_inl
 
 // This is a shared-memory implementation of exclusive scan. Note that the
