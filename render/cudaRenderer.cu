@@ -455,6 +455,25 @@ __global__ void kernelRenderCircles() {
             __syncthreads();
 
             uint total = block_count[SCAN_BLOCK_DIM-1]+thread_count[SCAN_BLOCK_DIM-1];
+
+            int current_index = i%SCAN_BLOCK_DIM;
+
+            if(current_index<SCAN_BLOCK_DIM-1 && block_count[current_index+1]>block_count[current_index]){
+                
+                circle_array[block_count[current_index]] = i;
+                
+
+            }
+            //__syncthreads();
+            
+            if(current_index == SCAN_BLOCK_DIM-1 && (total>block_count[current_index])){
+
+                circle_array[block_count[current_index]] = i;
+                
+            }
+
+              __syncthreads();
+
             
 
             for(int k = 0;k<total; k++){
