@@ -16,7 +16,11 @@
 #include "noise.h"
 #include "sceneLoader.h"
 #include "util.h"
-#define SCAN_BLOCK_DIM 256
+
+
+
+
+#define SCAN_BLOCK_DIM 1024
 #include "exclusiveScan.cu_inl"
 #include "circleBoxTest.cu_inl"
 
@@ -59,9 +63,6 @@ __constant__ float  cuConstNoise1DValueTable[256];
 // Color ramp table needed for the color ramp lookup shader
 #define COLOR_MAP_SIZE 5
 __constant__ float  cuConstColorRamp[COLOR_MAP_SIZE][3];
-
-#define THREAD_X 1024
-#define THREAD_Y 1
 
 
 
@@ -401,10 +402,10 @@ shadePixel(float2 pixelCenter, float3 p, float4* imagePtr, int circleIndex) {
 // resulting image will be incorrect.
 __global__ void kernelRenderCircles() {
 
-    int pixel_index = blockIdx.x * blockDim.x + threadIdx.x;
+    int pixel_index_x = blockIdx.x * blockDim.x + threadIdx.x;
     int pixel_index_y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (pixel_index > cuConstRendererParams.imageWidth)
+    if (pixel_index_x >cuConstRendererParams.imageWidth)
         return;
     if (pixel_index_y>cuConstRendererParams.imageHeight)
         return;
@@ -412,90 +413,66 @@ __global__ void kernelRenderCircles() {
     short imageWidth = cuConstRendererParams.imageWidth;
     
     short imageHeight = cuConstRendererParams.imageHeight;
-
+    
     float invWidth = 1.f / imageWidth;
+    
     float invHeight = 1.f / imageHeight;
 
     
-    __shared__ uint thread_count[SCAN_BLOCK_DIM];
-    __shared__ uint block_count[SCAN_BLOCK_DIM];
-    __shared__ uint prefixSumScratch[2 * SCAN_BLOCK_DIM];
-    __shared__ uint circle_array[SCAN_BLOCK_DIM];
-
+    
 
     int linearThreadIndex =  threadIdx.y * blockDim.y + threadIdx.x;
 
-    float boxL = static_cast<float>(blockIdx.x * THREAD_X) * invWidth;
-    float boxR = static_cast<float>(blockIdx.x * THREAD_X+THREAD_X-1)*invWidth;
-    float boxT = static_cast<float>(blockIdx.y*THREAD_Y)*invWidth;
-    float boxB = static_cast<float>(blockIdx.y*THREAD_Y+THREAD_Y-1)*invWidth;
+    float boxL = static_cast<float>(blockIdx.x * blockDim.x) * invWidth;
+    
+    float boxR = static_cast<float>(blockIdx.x * blockDim.x+ blockDim.x)*invWidth;
+    
+    float boxB = static_cast<float>(blockIdx.y*blockDim.y)*invHeight;
+    
+    float boxT = static_cast<float>(blockIdx.y*blockDim.y+blockDim.y)*invHeight;
 
+    __shared__ uint thread_count[SCAN_BLOCK_DIM];
     
-    int circle_amount = (cuConstRendererParams.numberOfCircles+SCAN_BLOCK_DIM-1)/SCAN_BLOCK_DIM;
+    __shared__ uint block_count[SCAN_BLOCK_DIM];
     
-    int current_circle_start = linearThreadIndex * circle_amount;
+    __shared__ uint prefixSumScratch[SCAN_BLOCK_DIM];
     
-    int current_circle_end = (linearThreadIndex == SCAN_BLOCK_DIM)?cuConstRendererParams.numberOfCircles: circle_amount+current_circle_start;
+    __shared__ uint circle_array[SCAN_BLOCK_DIM];
 
-    for(int i = current_circle_start;i<current_circle_end;i++){
-        if(i<cuConstRendererParams.numberOfCircles){
+
+    for(int i = linearThreadIndex;i<cuConstRendererParams.numberOfCircles;i+=SCAN_BLOCK_DIM){
+            
             float3 position = *(float3*)(&cuConstRendererParams.position[i*3]);
+            
             float radius = cuConstRendererParams.radius[i];
             
-            thread_count[i] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxB,boxT);
+            thread_count[i] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
+
+            __syncthreads();
+
+            sharedMemExclusiveScan(linearThreadIndex,thread_count,block_count,prefixSumScratch,SCAN_BLOCK_DIM);
+
+            __syncthreads();
+
+            uint total = block_count[SCAN_BLOCK_DIM-1]+thread_count[SCAN_BLOCK_DIM-1];
+            
+
+            for(int k = 0;k<total; k++){
+                int index = circle_array[k];
+                int index3 = 3 * index;
+                float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
+
+                float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_index_y * imageWidth + pixel_index_x)]);
         
-        }else{
-            thread_count[i]=0;
-        }
-    }
-
-     __syncthreads();
-
-    sharedMemExclusiveScan(linearThreadIndex,thread_count,block_count,prefixSumScratch,SCAN_BLOCK_DIM);
-     __syncthreads();
-
-
-    uint total = block_count[SCAN_BLOCK_DIM-1]+thread_count[SCAN_BLOCK_DIM-1];
-
-     for(int i = current_circle_start;i<current_circle_end;i++){
-        if(i<cuConstRendererParams.numberOfCircles){
-            if (thread_count[i]==1){
-                circle_array[block_count[i]] = i;
-
+                float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixel_index_x) + 0.5f),invHeight * (static_cast<float>(pixel_index_y) + 0.5f));
+        
+                shadePixel(pixelCenterNorm, p, imgPtr, index);
+                
             }
-        
-        }
-    }
-    __syncthreads();
-    
-    
-    for(int i = 0;i<total; i++){
-        int index = circle_array[i];
-        int index3 = 3 * index;
-        float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
-
-        float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_index_y * imageWidth + pixel_index)]);
-        
-        float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixel_index) + 0.5f),invHeight * (static_cast<float>(pixel_index_y) + 0.5f));
-        
-        shadePixel(pixelCenterNorm, p, imgPtr, index);
-
             
-            
-        // }
     }
 
-    // Read position and radius
     
-
-    // Compute the bounding box of the circle. The bound is in integer
-    // screen coordinates, so it's clamped to the edges of the screen.
-    
-
-    // A bunch of clamps.  Is there a CUDA built-in for this?
-    
-
-    // For all pixels in the bounding box
     
 }
 
@@ -701,7 +678,7 @@ CudaRenderer::clearImage() {
 void
 CudaRenderer::advanceAnimation() {
      // 256 threads per block is a healthy number
-    dim3 blockDim(256, 1);
+    dim3 blockDim(32, 32);
     dim3 gridDim((numberOfCircles + blockDim.x - 1) / blockDim.x);
 
     // only the snowflake scene has animation
@@ -721,7 +698,7 @@ void
 CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
-    dim3 blockDim(THREAD_X,THREAD_Y);
+    dim3 blockDim(256,1);
     dim3 gridDim((image->width+ blockDim.x - 1) / blockDim.x,(image->height+blockDim.y - 1)/blockDim.y);
 
     kernelRenderCircles<<<gridDim, blockDim>>>();
