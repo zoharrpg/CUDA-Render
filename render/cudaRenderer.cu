@@ -20,7 +20,7 @@
 
 
 
-#define SCAN_BLOCK_DIM 256
+#define SCAN_BLOCK_DIM 1024
 #include "exclusiveScan.cu_inl"
 #include "circleBoxTest.cu_inl"
 
@@ -405,9 +405,9 @@ __global__ void kernelRenderCircles() {
     int pixel_index_x = blockIdx.x * blockDim.x + threadIdx.x;
     int pixel_index_y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (pixel_index_x >cuConstRendererParams.imageWidth)
+    if (pixel_index_x >=cuConstRendererParams.imageWidth)
         return;
-    if (pixel_index_y>cuConstRendererParams.imageHeight)
+    if (pixel_index_y>=cuConstRendererParams.imageHeight)
         return;
     
     short imageWidth = cuConstRendererParams.imageWidth;
@@ -453,7 +453,7 @@ __global__ void kernelRenderCircles() {
                 float radius = cuConstRendererParams.radius[c_index];
 
                  
-            thread_count[linearThreadIndex] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
+                thread_count[linearThreadIndex] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
 
             }else{
                 thread_count[linearThreadIndex]= 0;
@@ -476,10 +476,9 @@ __global__ void kernelRenderCircles() {
             }
 
             
-            if(linearThreadIndex == SCAN_BLOCK_DIM-1 && (total>block_count[SCAN_BLOCK_DIM-1 ])){
+            if(linearThreadIndex == SCAN_BLOCK_DIM-1 && (total >block_count[linearThreadIndex] )){
 
                 circle_array[block_count[linearThreadIndex]] = c_index;
-                //printf("%d\n",current_index);
                 
             }
 
@@ -729,7 +728,7 @@ void
 CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
-    dim3 blockDim(256,1);
+    dim3 blockDim(32,32);
     dim3 gridDim((image->width+ blockDim.x - 1) / blockDim.x,(image->height+blockDim.y - 1)/blockDim.y);
 
     kernelRenderCircles<<<gridDim, blockDim>>>();
