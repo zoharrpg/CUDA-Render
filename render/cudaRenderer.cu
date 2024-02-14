@@ -20,7 +20,7 @@
 
 
 
-#define SCAN_BLOCK_DIM 1024
+#define SCAN_BLOCK_DIM 256
 #include "exclusiveScan.cu_inl"
 #include "circleBoxTest.cu_inl"
 
@@ -421,7 +421,7 @@ __global__ void kernelRenderCircles() {
     
     
 
-    int linearThreadIndex =  threadIdx.y * blockDim.y + threadIdx.x;
+    int linearThreadIndex =  threadIdx.y * blockDim.x + threadIdx.x;
 
     float boxL = static_cast<float>(blockIdx.x * blockDim.x) * invWidth;
     
@@ -435,21 +435,30 @@ __global__ void kernelRenderCircles() {
     
     __shared__ uint block_count[SCAN_BLOCK_DIM];
     
-    __shared__ uint prefixSumScratch[SCAN_BLOCK_DIM];
+    __shared__ uint prefixSumScratch[2*SCAN_BLOCK_DIM];
     
     __shared__ uint circle_array[SCAN_BLOCK_DIM];
 
+    uint c_index;
 
-    for(int i = linearThreadIndex;i<cuConstRendererParams.numberOfCircles;i+=SCAN_BLOCK_DIM){
-            
-            
-            float3 position = *(float3*)(&cuConstRendererParams.position[3*i]);
-            
-            float radius = cuConstRendererParams.radius[i];
 
-            
+    for(int i = 0;i<cuConstRendererParams.numberOfCircles;i+=SCAN_BLOCK_DIM){
+
+            c_index = i+linearThreadIndex;
+
+            if(c_index < cuConstRendererParams.numberOfCircles){
+
+                float3 position = *(float3*)(&cuConstRendererParams.position[3*c_index]);
+
+                float radius = cuConstRendererParams.radius[c_index];
+
+                 
             thread_count[linearThreadIndex] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
 
+            }else{
+                thread_count[linearThreadIndex]= 0;
+            }
+            
             __syncthreads();
 
             sharedMemExclusiveScan(linearThreadIndex,thread_count,block_count,prefixSumScratch,SCAN_BLOCK_DIM);
@@ -458,23 +467,27 @@ __global__ void kernelRenderCircles() {
             
             uint total = block_count[SCAN_BLOCK_DIM-1]+thread_count[SCAN_BLOCK_DIM-1];
 
-            if(linearThreadIndex<SCAN_BLOCK_DIM-1 && thread_count[linearThreadIndex]==1& block_count[linearThreadIndex+1]>block_count[linearThreadIndex] ){
+            if(linearThreadIndex<SCAN_BLOCK_DIM-1 && block_count[linearThreadIndex+1]>block_count[linearThreadIndex] ){
                
-                circle_array[block_count[linearThreadIndex]] = i;
+                circle_array[block_count[linearThreadIndex]] = c_index;
                  //printf("%d\n",current_index);
                 
 
             }
-            //__syncthreads();
-            
-            if(linearThreadIndex == SCAN_BLOCK_DIM-1 && (total>block_count[SCAN_BLOCK_DIM-1 ]&& thread_count[linearThreadIndex]==1)){
 
-                circle_array[block_count[linearThreadIndex]] = i;
+            
+            if(linearThreadIndex == SCAN_BLOCK_DIM-1 && (total>block_count[SCAN_BLOCK_DIM-1 ])){
+
+                circle_array[block_count[linearThreadIndex]] = c_index;
                 //printf("%d\n",current_index);
                 
             }
 
               __syncthreads();
+
+            float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_index_y * imageWidth + pixel_index_x)]);
+
+            float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixel_index_x) + 0.5f),invHeight * (static_cast<float>(pixel_index_y) + 0.5f));
 
             
 
@@ -482,14 +495,11 @@ __global__ void kernelRenderCircles() {
                 int index = circle_array[k];
                 int index3 = 3 * index;
                 float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
-
-                float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_index_y * imageWidth + pixel_index_x)]);
-        
-                float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixel_index_x) + 0.5f),invHeight * (static_cast<float>(pixel_index_y) + 0.5f));
-        
+                
                 shadePixel(pixelCenterNorm, p, imgPtr, index);
                 
             }
+            __syncthreads();
             
     }
 
@@ -719,7 +729,7 @@ void
 CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
-    dim3 blockDim(32,32);
+    dim3 blockDim(256,1);
     dim3 gridDim((image->width+ blockDim.x - 1) / blockDim.x,(image->height+blockDim.y - 1)/blockDim.y);
 
     kernelRenderCircles<<<gridDim, blockDim>>>();
