@@ -21,3 +21,26 @@ Kernel: 0.685 ms                [326.293 GB/s]
 ```
 The RTX 2080 GPU has 448 GB/s memory bandwidthand Kernel speed is really fast, about 326GB/s, and consistent with this high memory bandwidth.
 The Overall timer includes the data transfer, about 6.5GB/s. The PCIe-x16 bus has maximum transfer speed of 16 GB/s, which is much lower than the kernel speed, so this speed is consistent with PCIe-x16 maximum transfer speed. GPU has really fast speed to process data internal, but the data transfer speed is limited by the bandwidth of PCIe-x16 bus. Therefore, the overall time is much longer due to the difference between the GPU fast process data bandwidth and low transfer data bandwidth between CPU and GPU.
+
+
+## Questions 2
+```bash
+------------
+Score table:
+------------
+-------------------------------------------------------------------------
+| Scene Name      | Target Time     | Your Time       | Score           |
+-------------------------------------------------------------------------
+| rgb             | 0.1855          | 0.1789          | 12              |
+| rand10k         | 1.9560          | 2.0302          | 12              |
+| rand100k        | 17.8552         | 19.3228         | 12              |
+| pattern         | 0.2713          | 0.2522          | 12              |
+| snowsingle      | 7.7305          | 6.9439          | 12              |
+| biglittle       | 14.2676         | 16.9361         | 12              |
+-------------------------------------------------------------------------
+|                                   | Total score:    | 72/72           |
+-------------------------------------------------------------------------
+```
+
+
+
