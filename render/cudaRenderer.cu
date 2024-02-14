@@ -19,8 +19,8 @@
 
 
 
-
-#define SCAN_BLOCK_DIM 1024
+#define BLOCK 32
+#define SCAN_BLOCK_DIM BLOCK*BLOCK
 #include "exclusiveScan.cu_inl"
 #include "circleBoxTest.cu_inl"
 
@@ -438,9 +438,12 @@ __global__ void kernelRenderCircles() {
     float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixelIndexY * imageWidth + pixelIndexX)]);
     float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixelIndexX) + 0.5f), invHeight * (static_cast<float>(pixelIndexY) + 0.5f));
 
+    float4 imgPtr_local = *imgPtr;
+    
     // Iterate over circles in steps of SCAN_BLOCK_DIM
     for (int i = 0; i < numberOfCircles; i += SCAN_BLOCK_DIM) {
         cIndex = i + linearThreadIndex;
+        __syncthreads();
         if (cIndex < numberOfCircles) {
             float3 position = *(float3*)(&cuConstRendererParams.position[3 * cIndex]);
             float radius = cuConstRendererParams.radius[cIndex];
@@ -468,13 +471,14 @@ __global__ void kernelRenderCircles() {
             for (int k = 0; k < total; k++) {
                 int index = prefixSumScratch[k];
                 float3 p = *(float3*)(&cuConstRendererParams.position[3 * index]);
-                shadePixel(pixelCenterNorm, p, imgPtr, index);
+                shadePixel(pixelCenterNorm, p, &imgPtr_local, index);
             }
         }
-        __syncthreads();
+    }
+    if (pixelIndexX < imageWidth && pixelIndexY < imageHeight) {
+        *imgPtr = imgPtr_local;
     }
 }
-
 
 ////////////////////////////////////////////////////////////////////////////////////////
 
@@ -698,7 +702,7 @@ void
 CudaRenderer::render() {
 
     // 256 threads per block is a healthy number
-    dim3 blockDim(32,32);
+    dim3 blockDim(BLOCK,BLOCK);
     dim3 gridDim((image->width+ blockDim.x - 1) / blockDim.x,(image->height+blockDim.y - 1)/blockDim.y);
 
     kernelRenderCircles<<<gridDim, blockDim>>>();
