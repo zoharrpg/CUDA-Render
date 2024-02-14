@@ -402,26 +402,29 @@ shadePixel(float2 pixelCenter, float3 p, float4* imagePtr, int circleIndex) {
 // resulting image will be incorrect.
 __global__ void kernelRenderCircles() {
 
+    int linearThreadIndex =  threadIdx.y * blockDim.x + threadIdx.x;
+    __shared__ short imageWidth;
+    __shared__ short imageHeight;
+    __shared__ float invWidth;
+    __shared__ float invHeight;
+    __shared__ int numberOfCircles;
+
+    if(linearThreadIndex == 0){
+        imageWidth = cuConstRendererParams.imageWidth;
+        imageHeight = cuConstRendererParams.imageHeight;
+        invWidth = 1.f / imageWidth;
+        
+        invHeight = 1.f / imageHeight;
+        numberOfCircles = cuConstRendererParams.numberOfCircles;
+
+    }
+     __syncthreads();
+
+
     int pixel_index_x = blockIdx.x * blockDim.x + threadIdx.x;
     int pixel_index_y = blockIdx.y * blockDim.y + threadIdx.y;
 
-    if (pixel_index_x >=cuConstRendererParams.imageWidth)
-        return;
-    if (pixel_index_y>=cuConstRendererParams.imageHeight)
-        return;
-    
-    short imageWidth = cuConstRendererParams.imageWidth;
-    
-    short imageHeight = cuConstRendererParams.imageHeight;
-    
-    float invWidth = 1.f / imageWidth;
-    
-    float invHeight = 1.f / imageHeight;
 
-    
-    
-
-    int linearThreadIndex =  threadIdx.y * blockDim.x + threadIdx.x;
 
     float boxL = static_cast<float>(blockIdx.x * blockDim.x) * invWidth;
     
@@ -436,30 +439,32 @@ __global__ void kernelRenderCircles() {
     __shared__ uint block_count[SCAN_BLOCK_DIM];
     
     __shared__ uint prefixSumScratch[2*SCAN_BLOCK_DIM];
-    
-    __shared__ uint circle_array[SCAN_BLOCK_DIM];
 
     uint c_index;
 
+    float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_index_y * imageWidth + pixel_index_x)]);
 
-    for(int i = 0;i<cuConstRendererParams.numberOfCircles;i+=SCAN_BLOCK_DIM){
+    float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixel_index_x) + 0.5f),invHeight * (static_cast<float>(pixel_index_y) + 0.5f));
+
+
+    for(int i = 0;i<numberOfCircles;i+=SCAN_BLOCK_DIM){
 
             c_index = i+linearThreadIndex;
 
-            if(c_index < cuConstRendererParams.numberOfCircles){
+            if(c_index < numberOfCircles){
 
                 float3 position = *(float3*)(&cuConstRendererParams.position[3*c_index]);
 
                 float radius = cuConstRendererParams.radius[c_index];
 
                  
-                thread_count[linearThreadIndex] = circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
+                thread_count[linearThreadIndex] =  circleInBoxConservative(position.x,position.y,radius,boxL,boxR,boxT,boxB);
 
             }else{
                 thread_count[linearThreadIndex]= 0;
             }
             
-            __syncthreads();
+           
 
             sharedMemExclusiveScan(linearThreadIndex,thread_count,block_count,prefixSumScratch,SCAN_BLOCK_DIM);
 
@@ -469,8 +474,7 @@ __global__ void kernelRenderCircles() {
 
             if(linearThreadIndex<SCAN_BLOCK_DIM-1 && block_count[linearThreadIndex+1]>block_count[linearThreadIndex] ){
                
-                circle_array[block_count[linearThreadIndex]] = c_index;
-                 //printf("%d\n",current_index);
+                prefixSumScratch[block_count[linearThreadIndex]] = c_index;
                 
 
             }
@@ -478,29 +482,32 @@ __global__ void kernelRenderCircles() {
             
             if(linearThreadIndex == SCAN_BLOCK_DIM-1 && (total >block_count[linearThreadIndex] )){
 
-                circle_array[block_count[linearThreadIndex]] = c_index;
+                prefixSumScratch[block_count[linearThreadIndex]] = c_index;
                 
             }
 
-              __syncthreads();
+            __syncthreads();
 
-            float4* imgPtr = (float4*)(&cuConstRendererParams.imageData[4 * (pixel_index_y * imageWidth + pixel_index_x)]);
+            if (pixel_index_x < imageWidth && pixel_index_y < imageHeight){
 
-            float2 pixelCenterNorm = make_float2(invWidth * (static_cast<float>(pixel_index_x) + 0.5f),invHeight * (static_cast<float>(pixel_index_y) + 0.5f));
-
-            
 
             for(int k = 0;k<total; k++){
-                int index = circle_array[k];
+                int index = prefixSumScratch[k];
                 int index3 = 3 * index;
                 float3 p = *(float3*)(&cuConstRendererParams.position[index3]);
                 
                 shadePixel(pixelCenterNorm, p, imgPtr, index);
                 
             }
-            __syncthreads();
+
+        }
+        __syncthreads();
+
             
     }
+
+
+    
 
     
     
