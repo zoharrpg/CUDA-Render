@@ -1,4 +1,5 @@
 # Assignment2
+Junshang Jia--junshanj, Kaiyuan Liu--kaiyuan3
 
 ## Question 1:
 
@@ -24,6 +25,7 @@ The Overall timer includes the data transfer, about 6.5GB/s. The PCIe-x16 bus ha
 
 
 ## Questions 2
+Machine: ghc56.ghc.andrew.cmu.edu
 ```bash
 ------------
 Score table:
@@ -41,6 +43,40 @@ Score table:
 |                                   | Total score:    | 72/72           |
 -------------------------------------------------------------------------
 ```
+3. We decomposed the problem into box of piexel and process each pixel in the box. The maximum number of threads in a block for RTX 2080 is 1024. Therefore, we decide to use 32x32 threads to process box of piexels in parallel.
+4. Basically, we use __syncthreads() to as the barrier for all threads. First, we wait all threads to compute their circle index, and process the box function. Second, we use __syncthreads() after sharedMemExclusiveScan to wait prefix sum completeion. At end the this inner loop, wait all threads to complete this iteration and move to next iteration together.
+``` cpp
+  cIndex = i + linearThreadIndex;
+        __syncthreads();
+        if (cIndex < numberOfCircles) {
+            float3 position = *(float3*)(&cuConstRendererParams.position[3 * cIndex]);
+            float radius = cuConstRendererParams.radius[cIndex];
+            threadCount[linearThreadIndex] = circleInBoxConservative(position.x, position.y, radius, boxL, boxR, boxT, boxB) &&
+                                              circleInBox(position.x, position.y, radius, boxL, boxR, boxT, boxB);
+        } else {
+            threadCount[linearThreadIndex] = 0;
+        }
+
+        sharedMemExclusiveScan(linearThreadIndex, threadCount, blockCount, prefixSumScratch, SCAN_BLOCK_DIM);
+        __syncthreads();
+
+        uint total = blockCount[SCAN_BLOCK_DIM - 1] + threadCount[SCAN_BLOCK_DIM - 1];
+        if (linearThreadIndex < SCAN_BLOCK_DIM - 1 && blockCount[linearThreadIndex + 1] > blockCount[linearThreadIndex]) {
+            prefixSumScratch[blockCount[linearThreadIndex]] = cIndex;
+        }
+
+        if (linearThreadIndex == SCAN_BLOCK_DIM - 1 && (total > blockCount[linearThreadIndex])) {
+            prefixSumScratch[blockCount[linearThreadIndex]] = cIndex;
+        }
+        __syncthreads();
+
+```
+5. Reduce communication by moving variables to shared memory, like moving prefixsum array and other frequently used constants to shared memory to make the access fast. Make image variable to local variable, and update it only when render is complete for this thread.
+
+6. In the first version, we use multiple threads to calculate each piexel with each circle, and we found the performance is very low. The problem is each piexl calculate each circle, whic produce a lot of work. To readuce this workload, we preprocess the circle, and find the circle that has intersect with this area. Then, we only render the circle that has intersect with area. In the end, we make image variable as the local variable to avoid the frequent read and write to global memory. 
+   
+
+
 
 
 
