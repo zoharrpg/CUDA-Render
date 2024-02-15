@@ -30,24 +30,28 @@ static inline int nextPow2(int n)
 }
 
 
-__global__ void up_sweep_kernel(int rounded_length, int *array, int twod) {
-    int twod1 = twod * 2;
+__global__ void
+up_sweep_kernel(int length,int*device_data,int twod1,int twod){
     int index = (blockIdx.x * blockDim.x + threadIdx.x) * twod1;
-    if (index + twod1 <= rounded_length) {
-        array[index + twod1 - 1] += array[index + twod - 1];
+
+    if (index < length){
+        device_data[index+twod1-1]+=device_data[index+twod-1];
     }
+
+
 }
 
-__global__ void down_sweep_kernel(int rounded_length, int *array, int twod) {
-    int twod1 = twod * 2;
-    int index = (blockIdx.x * blockDim.x + threadIdx.x) * twod1;
-    if (index + twod1 <= rounded_length) {
-        int t = array[index + twod - 1];
-        array[index + twod - 1] = array[index + twod1 - 1];
-        array[index + twod1 - 1] += t;
-    }
-}
+__global__ void
+down_sweep_kernel(int length,int*device_data,int twod1,int twod){
+    int index =( blockIdx.x * blockDim.x + threadIdx.x )* twod1;
 
+    if(index < length){
+        int t = device_data[index+twod-1];
+        device_data[index+twod-1] = device_data[index+twod1-1];
+        device_data[index+twod1-1]+=t;
+    }
+
+}
 
 void exclusive_scan(int* device_data, int length)
 {
